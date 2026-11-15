@@ -1,0 +1,49 @@
+name: track
+# Hourly: Blizzard publishes the Forever auction snapshots about 20 minutes past the hour; GitHub may start a
+# scheduled run a few minutes late, so it runs at :40 and waits up to 7 minutes for a snapshot it hasn't recorded.
+on:
+  schedule:
+    - cron: "40 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: track
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Previous snapshot
+        run: gh release download data --pattern state.json.gz --dir . || echo "no state yet - this run starts fresh"
+
+      - name: Scan the auction houses
+        env:
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+        run: python3 track.py --state state.json.gz --out out --wait 420
+
+      - name: Upload
+        run: |
+          shopt -s nullglob
+          files=(out/h-*.json.gz)
+          if [ ${#files[@]} -eq 0 ]; then echo "nothing new"; exit 0; fi
+          for i in 1 2 3; do gh release upload data "${files[@]}" && break; sleep 10; done
+          for i in 1 2 3; do gh release upload data state.json.gz --clobber && break; sleep 10; done
+
+      - name: Drop files older than 30 days (Blizzard API terms)
+        run: |
+          id=$(gh api "repos/$GH_REPO/releases/tags/data" --jq .id)
+          cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/$GH_REPO/releases/$id/assets?per_page=100" \
+            --jq ".[] | select((.name | startswith(\"h-\")) and .created_at < \"$cutoff\") | .id" |
+          while read -r a; do gh api -X DELETE "repos/$GH_REPO/releases/assets/$a" && echo "deleted asset $a"; done
