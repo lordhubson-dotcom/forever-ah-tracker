@@ -248,15 +248,16 @@ def main():
     log(f"{len(houses)} houses; state has {len(st)} (newest {max((v['ts'] for v in st.values()), default='-')})")
 
     deadline = time.time() + args.wait
-    if PROBE in st and PROBE in houses:            # wait until Blizzard publishes a snapshot we haven't recorded
+    if PROBE in st and PROBE in houses:            # nothing new: wait only around publication time (:15-:35)
         while True:
             s, lm, _ = api.get(f"/data/wow/ruleset/{RULESET}/auctions/{PROBE}")
             if lm and iso(lm) != st[PROBE]["ts"]:
                 break
-            if time.time() > deadline:
-                log(f"no new snapshot yet (still {st[PROBE]['ts']}) - nothing to do")
+            minute = datetime.now(timezone.utc).minute
+            if time.time() > deadline or not 15 <= minute <= 35:
+                log(f"no new snapshot (still {st[PROBE]['ts']}) - nothing to do")
                 return
-            time.sleep(45)
+            time.sleep(30)
 
     records, pending = [], list(houses)
     while pending:

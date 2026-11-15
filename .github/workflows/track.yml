@@ -1,9 +1,11 @@
 name: track
-# Hourly: Blizzard publishes the Forever auction snapshots about 20 minutes past the hour; GitHub may start a
-# scheduled run a few minutes late, so it runs at :40 and waits up to 7 minutes for a snapshot it hasn't recorded.
+# Blizzard publishes the Forever auction snapshots about 20 minutes past the hour. GitHub starts scheduled runs late,
+# sometimes by over half an hour (15 Nov: the :40 run started at :16 the next hour), so it runs twice an hour: at :25
+# (waits up to 3 minutes for that hour's snapshot) and at :55 (picks it up if the :25 run was late or skipped; exits at
+# once when there is nothing new). About 2 billed minutes an hour, within the free 2,000 a month.
 on:
   schedule:
-    - cron: "40 * * * *"
+    - cron: "25,55 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -30,7 +32,7 @@ jobs:
         env:
           BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
           BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
-        run: python3 track.py --state state.json.gz --out out --wait 420
+        run: python3 track.py --state state.json.gz --out out --wait 180
 
       - name: Upload
         run: |
