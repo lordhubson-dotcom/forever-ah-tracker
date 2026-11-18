@@ -233,11 +233,20 @@ def main():
     ap.add_argument("--out", default="out")
     ap.add_argument("--wait", type=int, default=420, help="seconds to wait for a new snapshot")
     ap.add_argument("--houses", default="", help="only these houses (comma list), for testing")
+    ap.add_argument("--check", metavar="LATEST", help="only print new=true/false: is the probe house's snapshot newer "
+                                                     "than the one in LATEST (a file holding its ts)?")
     args = ap.parse_args()
     cid, secret = os.environ.get("BLIZZARD_CLIENT_ID"), os.environ.get("BLIZZARD_CLIENT_SECRET")
     if not cid or not secret:
         sys.exit("BLIZZARD_CLIENT_ID / BLIZZARD_CLIENT_SECRET are not set")
     api = Api(cid, secret)
+    if args.check is not None:                     # cheap pre-check: one small request, no state download
+        last = open(args.check).read().strip() if os.path.exists(args.check) else ""
+        s, lm, _ = api.get(f"/data/wow/ruleset/{RULESET}/auctions/{PROBE}")
+        now_ts = iso(lm) if lm else ""
+        print(f"new={'true' if now_ts and now_ts != last else 'false'}")
+        log(f"probe house {PROBE}: {now_ts or '?'} (last recorded {last or 'none'})", )
+        return
     st = load_state(args.state)
 
     idx = api.get(f"/data/wow/ruleset/{RULESET}/auctions/")[2] or {}
@@ -256,6 +265,9 @@ def main():
             minute = datetime.now(timezone.utc).minute
             if time.time() > deadline or not 15 <= minute <= 35:
                 log(f"no new snapshot (still {st[PROBE]['ts']}) - nothing to do")
+                os.makedirs(args.out, exist_ok=True)
+                with open(os.path.join(args.out, "latest.txt"), "w") as fh:
+                    fh.write(st[PROBE]["ts"])
                 return
             time.sleep(30)
 
@@ -285,6 +297,9 @@ def main():
         json.dump({"v": 1, "region": REGION, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                    "houses": records}, fh, separators=(",", ":"))
     save_state(args.state, st)
+    if PROBE in st:                                # the marker the next run's --check compares against
+        with open(os.path.join(args.out, "latest.txt"), "w") as fh:
+            fh.write(st[PROBE]["ts"])
     size = os.path.getsize(os.path.join(args.out, name))
     log(f"wrote {name} ({size // 1024} KB, {len(records)} houses, "
         f"{sum(r['diffed'] for r in records)} compared with the previous hour)")

@@ -1,11 +1,11 @@
 name: track
-# Blizzard publishes the Forever auction snapshots about 20 minutes past the hour. GitHub starts scheduled runs late,
-# sometimes by over half an hour (15 Nov: the :40 run started at :16 the next hour), so it runs twice an hour: at :25
-# (waits up to 3 minutes for that hour's snapshot) and at :55 (picks it up if the :25 run was late or skipped; exits at
-# once when there is nothing new). About 2 billed minutes an hour, within the free 2,000 a month.
+# Blizzard publishes the Forever auction snapshots about 20 minutes past the hour. GitHub runs scheduled jobs late or
+# skips them (15-18 Nov: about half of the :25/:55 runs never came, 12 hours missed), so in this public repository
+# (unlimited minutes) it checks every 10 minutes. A check is one small request against latest.txt; only a new snapshot
+# downloads the previous state and scans every house.
 on:
   schedule:
-    - cron: "25,55 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -22,27 +22,40 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+      BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Anything new?
+        id: check
+        run: |
+          gh release download data --pattern latest.txt --dir . 2>/dev/null || echo "no marker yet"
+          python3 track.py --check latest.txt | tee -a "$GITHUB_OUTPUT"
+
       - name: Previous snapshot
+        if: steps.check.outputs.new == 'true'
         run: gh release download data --pattern state.json.gz --dir . || echo "no state yet - this run starts fresh"
 
       - name: Scan the auction houses
-        env:
-          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
-          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
-        run: python3 track.py --state state.json.gz --out out --wait 180
+        if: steps.check.outputs.new == 'true'
+        run: python3 track.py --state state.json.gz --out out --wait 150
 
       - name: Upload
+        if: steps.check.outputs.new == 'true'
         run: |
           shopt -s nullglob
           files=(out/h-*.json.gz)
-          if [ ${#files[@]} -eq 0 ]; then echo "nothing new"; exit 0; fi
-          for i in 1 2 3; do gh release upload data "${files[@]}" && break; sleep 10; done
-          for i in 1 2 3; do gh release upload data state.json.gz --clobber && break; sleep 10; done
+          if [ ${#files[@]} -gt 0 ]; then
+            for i in 1 2 3; do gh release upload data "${files[@]}" && break; sleep 10; done
+            for i in 1 2 3; do gh release upload data state.json.gz --clobber && break; sleep 10; done
+          else
+            echo "nothing new"
+          fi
+          if [ -f out/latest.txt ]; then gh release upload data out/latest.txt --clobber; fi
 
       - name: Drop files older than 30 days (Blizzard API terms)
+        if: steps.check.outputs.new == 'true'
         run: |
           id=$(gh api "repos/$GH_REPO/releases/tags/data" --jq .id)
           cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
