@@ -245,7 +245,7 @@ def main():
         s, lm, _ = api.get(f"/data/wow/ruleset/{RULESET}/auctions/{PROBE}")
         now_ts = iso(lm) if lm else ""
         print(f"new={'true' if now_ts and now_ts != last else 'false'}")
-        log(f"probe house {PROBE}: {now_ts or '?'} (last recorded {last or 'none'})", )
+        print(f"probe house {PROBE}: {now_ts or '?'} (last recorded {last or 'none'})", file=sys.stderr)
         return
     st = load_state(args.state)
 

@@ -31,7 +31,7 @@ jobs:
         id: check
         run: |
           gh release download data --pattern latest.txt --dir . 2>/dev/null || echo "no marker yet"
-          python3 track.py --check latest.txt | tee -a "$GITHUB_OUTPUT"
+          python3 track.py --check latest.txt | grep "^new=" | tee -a "$GITHUB_OUTPUT"
 
       - name: Previous snapshot
         if: steps.check.outputs.new == 'true'
